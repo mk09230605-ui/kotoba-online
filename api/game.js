@@ -25,9 +25,11 @@ function publicRoom(room, me) {
     pending: room.pending ? { mode: room.pending.mode, card: room.pending.card, answered: room.players.map((p, i) => Boolean(room.pending.answers[i])) } : null,
     message: room.message, persistent: isPersistent(),
     players: room.players.map((p, index) => ({
-      name: p.name, ready: Boolean(p.secret), lead: p.lead, cond: p.cond, guesses: p.guesses,
+      name: p.name, ready: Boolean(p.secret),
+      // 設定内容と秘密単語は本人にだけ返す。相手には設定済みかどうかだけを公開する。
+      lead: index === me ? p.lead : undefined, cond: index === me ? p.cond : undefined, guesses: p.guesses,
       score: p.score, solved: p.solved, records: p.records,
-      secret: (p.solved || room.phase === 'ended') ? p.secret : undefined,
+      secret: index === me ? p.secret : undefined,
       own: index === me, hand: index === me ? p.hand : undefined
     }))
   };
