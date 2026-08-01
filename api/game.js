@@ -9,6 +9,19 @@ const shuffle = values => [...values].sort(() => Math.random() - .5);
 const normalize = value => String(value || '').trim().normalize('NFC');
 const isOwner = (room, token) => room.players.findIndex(player => player.token === token);
 const turnLimit = room => room.players.length === 2 ? 10 : 12;
+const wordRevealTurn = room => room.players.length === 3 ? 3 : 4;
+
+function publicWordMask(room, player, wordRevealed) {
+  if (!wordRevealed || !player.secret) return undefined;
+  const characters = Array.from(player.secret);
+  const visible = new Set([characters[0]]);
+  if (room.showHiraganaPositions) {
+    room.declarations.forEach((declaration, index) => {
+      if (declaration.mode === 'kana' && player.records[index] === 'YES') visible.add(declaration.label);
+    });
+  }
+  return characters.map(character => visible.has(character) ? character : '○').join('');
+}
 
 function fail(message, status = 400) {
   const error = new Error(message); error.status = status; throw error;
@@ -19,8 +32,10 @@ function requirePlayer(room, token) {
   return index;
 }
 function publicRoom(room, me) {
+  const wordRevealed = Boolean(room.showWordLength) && room.turns >= wordRevealTurn(room);
   return {
-    id: room.id, phase: room.phase, playerCount: room.playerCount, selfJudge: room.selfJudge, turn: room.turn,
+    id: room.id, phase: room.phase, playerCount: room.playerCount, selfJudge: room.selfJudge,
+    showWordLength: Boolean(room.showWordLength), showHiraganaPositions: Boolean(room.showHiraganaPositions), wordRevealed, turn: room.turn,
     turns: room.turns, turnLimit: turnLimit(room), declarations: room.declarations,
     pending: room.pending ? { mode: room.pending.mode, card: room.pending.card, answered: room.players.map((p, i) => Boolean(room.pending.answers[i])) } : null,
     message: room.message, persistent: isPersistent(),
@@ -28,7 +43,7 @@ function publicRoom(room, me) {
       name: p.name, ready: Boolean(p.secret),
       // 設定内容と秘密単語は本人にだけ返す。相手には設定済みかどうかだけを公開する。
       lead: index === me ? p.lead : undefined, cond: index === me ? p.cond : undefined, guesses: p.guesses,
-      score: p.score, solved: p.solved, records: p.records,
+      score: p.score, solved: p.solved, records: p.records, secretMask: publicWordMask(room, p, wordRevealed),
       secret: index === me ? p.secret : undefined,
       own: index === me, hand: index === me ? p.hand : undefined
     }))
@@ -122,7 +137,7 @@ module.exports = async (req, res) => {
     if (body.type === 'create') {
       const name = normalize(body.name); if (!name) fail('表示名を入力してください。');
       let id; do { id = random(6); } while (await getRoom(id));
-      const token = random(32); const room = { id, playerCount: 2, phase: 'waiting', selfJudge: true, players: [{ name: name.slice(0, 20), token, score: 0 }], declarations: [], turns: 0, turn: 0, message: '対戦相手の参加を待っている。' };
+      const token = random(32); const room = { id, playerCount: 2, phase: 'waiting', selfJudge: body.selfJudge === false ? false : true, showWordLength: body.showWordLength === true, showHiraganaPositions: body.showHiraganaPositions === true, players: [{ name: name.slice(0, 20), token, score: 0 }], declarations: [], turns: 0, turn: 0, message: '対戦相手の参加を待っている。' };
       await setRoom(room); return res.status(201).json({ roomId: id, token });
     }
     if (body.type === 'join') {
