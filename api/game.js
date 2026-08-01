@@ -35,8 +35,10 @@ function publicRoom(room, me) {
   const wordRevealed = Boolean(room.showWordLength) && room.turns >= wordRevealTurn(room);
   return {
     id: room.id, phase: room.phase, playerCount: room.playerCount, selfJudge: room.selfJudge,
-    showWordLength: Boolean(room.showWordLength), showHiraganaPositions: Boolean(room.showHiraganaPositions), wordRevealed, turn: room.turn,
+    showWordLength: Boolean(room.showWordLength), showHiraganaPositions: Boolean(room.showHiraganaPositions),
+    showWrongGuessWord: Boolean(room.showWrongGuessWord), targetScoreMode: room.targetScoreMode || 'normal', wordRevealed, turn: room.turn,
     turns: room.turns, turnLimit: turnLimit(room), declarations: room.declarations,
+    wrongGuesses: (room.wrongGuesses || []).map(guess => ({ targetIndex: guess.targetIndex, word: room.showWrongGuessWord ? guess.word : undefined })),
     pending: room.pending ? { mode: room.pending.mode, card: room.pending.card, answered: room.players.map((p, i) => Boolean(room.pending.answers[i])) } : null,
     message: room.message, persistent: isPersistent(),
     players: room.players.map((p, index) => ({
@@ -114,8 +116,8 @@ function action(room, me, body) {
     const targetIndex = Number(body.targetIndex), word = normalize(body.word), target = room.players[targetIndex];
     if (!word || !target || targetIndex === me || target.solved) fail('回答内容が不正です。');
     player.guesses--; const correct = word === target.secret;
-    if (correct) { target.solved = true; player.score++; target.score++; room.message = `${player.name} が ${target.name} の単語を正解した。`; }
-    else room.message = `${player.name} の回答は不正解。`;
+    if (correct) { target.solved = true; player.score++; target.score += room.targetScoreMode === 'penalty' ? -1 : 1; room.message = `${player.name} が ${target.name} の単語を正解した。`; }
+    else { room.wrongGuesses = room.wrongGuesses || []; room.wrongGuesses.push({ targetIndex, word }); room.message = `${player.name} の回答は不正解。`; }
     endTurn(room); return;
   }
   if (body.type === 'pass') {
@@ -137,7 +139,7 @@ module.exports = async (req, res) => {
     if (body.type === 'create') {
       const name = normalize(body.name); if (!name) fail('表示名を入力してください。');
       let id; do { id = random(6); } while (await getRoom(id));
-      const token = random(32); const room = { id, playerCount: 2, phase: 'waiting', selfJudge: body.selfJudge === false ? false : true, showWordLength: body.showWordLength === true, showHiraganaPositions: body.showHiraganaPositions === true, players: [{ name: name.slice(0, 20), token, score: 0 }], declarations: [], turns: 0, turn: 0, message: '対戦相手の参加を待っている。' };
+      const token = random(32); const room = { id, playerCount: 2, phase: 'waiting', selfJudge: body.selfJudge === false ? false : true, showWordLength: body.showWordLength === true, showHiraganaPositions: body.showHiraganaPositions === true, showWrongGuessWord: body.showWrongGuessWord === true, targetScoreMode: body.targetScoreMode === 'penalty' ? 'penalty' : 'normal', players: [{ name: name.slice(0, 20), token, score: 0 }], declarations: [], wrongGuesses: [], turns: 0, turn: 0, message: '対戦相手の参加を待っている。' };
       await setRoom(room); return res.status(201).json({ roomId: id, token });
     }
     if (body.type === 'join') {
