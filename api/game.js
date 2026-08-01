@@ -1,11 +1,34 @@
 const { getRoom, setRoom, isPersistent } = require('./_store');
+const { randomBytes, randomInt } = require('node:crypto');
 
 const CARDS = [
   ['あ','薄いもの'],['い','今日目にしたもの'],['う','コンビニに売ってるもの'],['え','人間しか使わないもの'],['お','頭が良さそうなもの'],['か','細いもの'],['き','いつかは捨てるもの'],['く','身体にいいもの'],['け','ただ一つであるもの'],['こ','流行っているもの'],['さ','音を発するもの'],['し','100円ショップにあるもの'],['す','複雑なもの'],['せ','恐ろしいもの'],['そ','速く動くもの'],['た','街で見かけるもの'],['ち','たくさんあるもの'],['つ','自分より重いもの'],['て','高価なもの'],['と','気分のいいもの'],['な','仕事で使うもの'],['に','理解できないもの'],['ぬ','子供が好きなもの'],['ね','夏っぽいもの'],['の','手に持つもの'],['は','1万円以上するもの'],['ひ','白いもの'],['ふ','ゲームに出てくるもの'],['へ','人気があるもの'],['ほ','柔らかいもの'],['ま','液状のもの'],['み','家に置いてあるもの'],['む','冷たいもの'],['め','便利なもの'],['も','手で触れないもの'],['や','電気を使うもの'],['ゆ','食べるまたは飲むもの'],['よ','架空のもの'],['ら','生きているもの'],['り','自然界に存在しないもの'],['る','昔はなかったもの'],['れ','学校にあるもの'],['ろ','教科書に載ってるもの'],['わ','日本らしいもの']
 ].map(([kana, condition], id) => ({ id, kana, condition }));
 
-const random = length => Array.from({ length }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
-const shuffle = values => [...values].sort(() => Math.random() - .5);
+const RANDOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const HAND_SIZE = 5;
+const INITIAL_GUESSES = 2;
+const SCORE = {
+  kanaYes: 5,
+  conditionYes: 1,
+  correctAnswer: 30,
+  targetCorrect: 20,
+  vote: 10
+};
+
+const random = length => Array.from(
+  randomBytes(length),
+  byte => RANDOM_ALPHABET[byte % RANDOM_ALPHABET.length]
+).join('');
+
+function shuffle(values) {
+  const shuffled = [...values];
+  for (let index = shuffled.length - 1; index > 0; index--) {
+    const swapIndex = randomInt(index + 1);
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled;
+}
 const normalize = value => String(value || '').trim().normalize('NFC');
 const isOwner = (room, token) => room.players.findIndex(player => player.token === token);
 const turnLimit = room => room.players.length === 2 ? 10 : 12;
@@ -54,8 +77,11 @@ function publicRoom(room, me) {
 }
 function deal(room) {
   const deck = shuffle(CARDS);
-  room.deck = deck.slice(room.playerCount * 5);
-  room.players.forEach((p, index) => Object.assign(p, { hand: deck.slice(index * 5, index * 5 + 5), secret: '', lead: null, cond: null, guesses: 2, solved: false, records: [] }));
+  room.deck = deck.slice(room.playerCount * HAND_SIZE);
+  room.players.forEach((player, index) => Object.assign(player, {
+    hand: deck.slice(index * HAND_SIZE, index * HAND_SIZE + HAND_SIZE),
+    secret: '', lead: null, cond: null, guesses: INITIAL_GUESSES, solved: false, records: []
+  }));
 }
 function maybeStart(room) {
   if (!room.players.every(p => p.secret)) return;
@@ -76,7 +102,7 @@ function endTurn(room) {
 function finishJudgement(room) {
   const pending = room.pending;
   const yesCount = room.players.reduce((count, player, index) => count + (!player.solved && pending.answers[index] === 'YES' ? 1 : 0), 0);
-  const judgementScore = yesCount * (pending.mode === 'kana' ? 5 : 1);
+  const judgementScore = yesCount * (pending.mode === 'kana' ? SCORE.kanaYes : SCORE.conditionYes);
   room.players[room.turn].score += judgementScore;
   room.declarations.push({ label: pending.mode === 'kana' ? pending.card.kana : pending.card.condition, mode: pending.mode });
   room.players.forEach((p, index) => {
@@ -120,7 +146,7 @@ function action(room, me, body) {
     const targetIndex = Number(body.targetIndex), word = normalize(body.word), target = room.players[targetIndex];
     if (!word || !target || targetIndex === me || target.solved) fail('回答内容が不正です。');
     player.guesses--; const correct = word === target.secret;
-    if (correct) { target.solved = true; player.score += 30; target.score += room.targetScoreMode === 'penalty' ? -20 : 20; room.message = `${player.name} が ${target.name} の単語を正解した。`; }
+    if (correct) { target.solved = true; player.score += SCORE.correctAnswer; target.score += room.targetScoreMode === 'penalty' ? -SCORE.targetCorrect : SCORE.targetCorrect; room.message = `${player.name} が ${target.name} の単語を正解した。`; }
     else { room.wrongGuesses = room.wrongGuesses || []; room.wrongGuesses.push({ targetIndex, word }); room.message = `${player.name} の回答は不正解。`; }
     endTurn(room); return;
   }
@@ -132,7 +158,7 @@ function action(room, me, body) {
     if (room.phase !== 'voting' || (room.votes || []).some(vote => vote.voterIndex === me)) fail('いまは投票できません。');
     const targetIndex = Number(body.targetIndex), target = room.players[targetIndex];
     if (!target || targetIndex === me) fail('投票先が不正です。');
-    room.votes = room.votes || []; room.votes.push({ voterIndex: me, targetIndex }); target.score += 10;
+    room.votes = room.votes || []; room.votes.push({ voterIndex: me, targetIndex }); target.score += SCORE.vote;
     if (room.votes.length >= room.players.length) {
       if (room.setNumber < room.setCount) { room.phase = 'nextSet'; room.message = '投票完了。次のセットへ進める。'; }
       else { room.phase = 'ended'; room.message = '投票完了。テスト対戦は終了した。'; }
