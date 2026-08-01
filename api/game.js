@@ -47,7 +47,7 @@ function publicRoom(room, me) {
       // 設定内容と秘密単語は本人にだけ返す。相手には設定済みかどうかだけを公開する。
       lead: index === me ? p.lead : undefined, cond: index === me ? p.cond : undefined, guesses: p.guesses,
       score: p.score, solved: p.solved, records: p.records, voteCount: (room.votes || []).filter(vote => vote.targetIndex === index).length, secretMask: publicWordMask(room, p, wordRevealed),
-      secret: index === me || room.phase === 'voting' || room.phase === 'ended' ? p.secret : undefined,
+      secret: index === me || p.solved || room.phase === 'voting' || room.phase === 'ended' ? p.secret : undefined,
       own: index === me, hand: index === me ? p.hand : undefined
     }))
   };
@@ -157,7 +157,7 @@ module.exports = async (req, res) => {
     if (body.type === 'create') {
       const name = normalize(body.name); if (!name) fail('表示名を入力してください。');
       let id; do { id = random(6); } while (await getRoom(id));
-      const setCount = Number(body.setCount); const token = random(32); const room = { id, playerCount: 2, setNumber: 1, setCount: Number.isInteger(setCount) && setCount >= 1 && setCount <= 4 ? setCount : 1, phase: 'waiting', selfJudge: body.selfJudge === false ? false : true, showWordLength: body.showWordLength === true, showHiraganaPositions: body.showHiraganaPositions === true, showWrongGuessWord: body.showWrongGuessWord === true, targetScoreMode: body.targetScoreMode === 'penalty' ? 'penalty' : 'normal', players: [{ name: name.slice(0, 20), token, score: 0 }], declarations: [], wrongGuesses: [], votes: [], turns: 0, turn: 0, message: '対戦相手の参加を待っている。' };
+      const setCount = Number(body.setCount), playerCount = Number(body.playerCount), token = random(32); const room = { id, playerCount: Number.isInteger(playerCount) && playerCount >= 2 && playerCount <= 4 ? playerCount : 2, setNumber: 1, setCount: Number.isInteger(setCount) && setCount >= 1 && setCount <= 4 ? setCount : 1, phase: 'waiting', selfJudge: body.selfJudge === false ? false : true, showWordLength: body.showWordLength === true, showHiraganaPositions: body.showHiraganaPositions === true, showWrongGuessWord: body.showWrongGuessWord === true, targetScoreMode: body.targetScoreMode === 'penalty' ? 'penalty' : 'normal', players: [{ name: name.slice(0, 20), token, score: 0 }], declarations: [], wrongGuesses: [], votes: [], turns: 0, turn: 0, message: '対戦相手の参加を待っている。' };
       await setRoom(room); return res.status(201).json({ roomId: id, token });
     }
     if (body.type === 'join') {
@@ -165,7 +165,10 @@ module.exports = async (req, res) => {
       if (!room) fail('ルームが見つかりません。', 404);
       if (room.phase !== 'waiting' || room.players.length >= room.playerCount) fail('このルームには参加できません。');
       if (!name) fail('表示名を入力してください。');
-      const token = random(32); room.players.push({ name: name.slice(0, 20), token, score: 0 }); deal(room); room.phase = 'setup'; room.message = '各自、秘密単語を設定する。'; await setRoom(room);
+      const token = random(32); room.players.push({ name: name.slice(0, 20), token, score: 0 });
+      if (room.players.length === room.playerCount) { deal(room); room.phase = 'setup'; room.message = '各自、秘密単語を設定する。'; }
+      else room.message = `対戦相手の参加を待っている（${room.players.length}/${room.playerCount}）。`;
+      await setRoom(room);
       return res.status(200).json({ roomId: room.id, token });
     }
     const room = await getRoom(body.roomId); if (!room) fail('ルームが見つかりません。', 404);
