@@ -75,11 +75,14 @@ function endTurn(room) {
 }
 function finishJudgement(room) {
   const pending = room.pending;
+  const yesCount = room.players.reduce((count, player, index) => count + (!player.solved && pending.answers[index] === 'YES' ? 1 : 0), 0);
+  const judgementScore = yesCount * (pending.mode === 'kana' ? 5 : 1);
+  room.players[room.turn].score += judgementScore;
   room.declarations.push({ label: pending.mode === 'kana' ? pending.card.kana : pending.card.condition, mode: pending.mode });
   room.players.forEach((p, index) => {
     if (!p.solved && !(room.selfJudge === false && index === room.turn)) p.records[room.turns] = pending.answers[index];
   });
-  room.pending = null; room.phase = 'guess'; room.message = '回答するか、回答せず終了を選ぶ。';
+  room.pending = null; room.phase = 'guess'; room.message = judgementScore ? `判定で ${judgementScore} 点を獲得。回答するか、回答せず終了を選ぶ。` : '回答するか、回答せず終了を選ぶ。';
 }
 function action(room, me, body) {
   const player = room.players[me];
@@ -117,7 +120,7 @@ function action(room, me, body) {
     const targetIndex = Number(body.targetIndex), word = normalize(body.word), target = room.players[targetIndex];
     if (!word || !target || targetIndex === me || target.solved) fail('回答内容が不正です。');
     player.guesses--; const correct = word === target.secret;
-    if (correct) { target.solved = true; player.score++; target.score += room.targetScoreMode === 'penalty' ? -1 : 1; room.message = `${player.name} が ${target.name} の単語を正解した。`; }
+    if (correct) { target.solved = true; player.score += 30; target.score += room.targetScoreMode === 'penalty' ? -20 : 20; room.message = `${player.name} が ${target.name} の単語を正解した。`; }
     else { room.wrongGuesses = room.wrongGuesses || []; room.wrongGuesses.push({ targetIndex, word }); room.message = `${player.name} の回答は不正解。`; }
     endTurn(room); return;
   }
@@ -129,7 +132,7 @@ function action(room, me, body) {
     if (room.phase !== 'voting' || (room.votes || []).some(vote => vote.voterIndex === me)) fail('いまは投票できません。');
     const targetIndex = Number(body.targetIndex), target = room.players[targetIndex];
     if (!target || targetIndex === me) fail('投票先が不正です。');
-    room.votes = room.votes || []; room.votes.push({ voterIndex: me, targetIndex }); target.score += .5;
+    room.votes = room.votes || []; room.votes.push({ voterIndex: me, targetIndex }); target.score += 10;
     if (room.votes.length >= room.players.length) {
       if (room.setNumber < room.setCount) { room.phase = 'nextSet'; room.message = '投票完了。次のセットへ進める。'; }
       else { room.phase = 'ended'; room.message = '投票完了。テスト対戦は終了した。'; }
